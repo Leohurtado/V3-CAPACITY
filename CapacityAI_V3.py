@@ -152,6 +152,29 @@ def extraer_cursos(valor):
     if not texto:
         return []
 
+    # Normaliza separadores frecuentes usados dentro de celdas de Excel.
+    texto = re.sub(
+        r"\s*\|\s*",
+        "\n",
+        texto
+    )
+    texto = re.sub(
+        r"\s*;\s*",
+        "\n",
+        texto
+    )
+
+    # Permite formatos como:
+    # "Capacitación / Entrenamiento: Primeros Auxilios"
+    # "Curso: Primeros Auxilios"
+    texto = re.sub(
+        r"\b(CAPACITACION(?:ES)?\s*/\s*ENTRENAMIENTO(?:S)?|"
+        r"ENTRENAMIENTO(?:S)?\s*/\s*CAPACITACION(?:ES)?|"
+        r"CAPACITACION(?:ES)?|ENTRENAMIENTO(?:S)?|CURSO(?:S)?)\s*:\s*",
+        lambda m: m.group(1) + "\n",
+        texto
+    )
+
     cursos = []
     capturando = False
 
@@ -195,23 +218,55 @@ def extraer_cursos(valor):
     return salida
 
 
+def es_columna_puesto(nombre):
+    """
+    La matriz puede usar UNO de estos nombres:
+    - Puesto de trabajo
+    - Cargo
+
+    No se exige que aparezcan ambos ni que exista
+    "Puesto de trabajo / Cargo".
+    """
+    c = normalizar(nombre).replace("\n", " ")
+    c = re.sub(r"\s+", " ", c).strip()
+
+    return (
+        c == "PUESTO DE TRABAJO"
+        or c == "CARGO"
+    )
+
+
+def es_columna_control(nombre):
+    c = normalizar(nombre).replace("\n", " ")
+    c = re.sub(r"\s+", " ", c).strip()
+
+    return (
+        "CONTROL ADMINISTRATIVO" in c
+        or "CONTROLES ADMINISTRATIVOS" in c
+        or "CONTROL ADMINISTRATIVOS" in c
+    )
+
+
 def encontrar_encabezado(df):
     mejor = None
     puntaje_max = 0
 
-    for i in range(min(60, len(df))):
-        fila = [normalizar(x) for x in df.iloc[i].tolist()]
-        puntaje = 0
+    for i in range(min(80, len(df))):
+        fila = [normalizar(x).replace("\n", " ") for x in df.iloc[i].tolist()]
 
-        if "PUESTO DE TRABAJO / CARGO" in fila:
+        puntaje = 0
+        tiene_puesto = any(es_columna_puesto(x) for x in fila)
+        tiene_control = any(es_columna_control(x) for x in fila)
+
+        if tiene_puesto:
             puntaje += 10
-        if "CONTROL ADMINISTRATIVO" in fila:
+        if tiene_control:
             puntaje += 10
-        if "PROCESO" in fila:
+        if any("PROCESO" == x or "PROCESO" in x for x in fila):
             puntaje += 1
-        if "ACTIVIDAD" in fila:
+        if any("ACTIVIDAD" in x for x in fila):
             puntaje += 1
-        if "TAREA" in fila:
+        if any("TAREA" in x for x in fila):
             puntaje += 1
 
         if puntaje > puntaje_max:
@@ -305,14 +360,15 @@ def analizar_excel(archivo):
         control_col = None
 
         for col in tabla.columns:
-            col_n = normalizar(col)
-
-            if col_n == "PUESTO DE TRABAJO / CARGO":
+            if puesto_col is None and es_columna_puesto(col):
                 puesto_col = col
 
-            if col_n.startswith("CONTROL ADMINISTRATIVO") and control_col is None:
+            if control_col is None and es_columna_control(col):
                 control_col = col
 
+        # Algunos Excel tienen encabezados partidos en dos filas.
+        # Si no se detectaron las columnas, intentamos combinar
+        # temporalmente dos filas consecutivas del encabezado.
         if puesto_col is None or control_col is None:
             continue
 
@@ -552,9 +608,14 @@ elif opcion == "Analizar IPERC":
 
             if matriz.empty:
                 st.error(
-                    "No se encontraron cursos. "
-                    "Revisa las columnas Puesto de Trabajo / Cargo "
-                    "y Control Administrativo."
+                    "No se encontraron cursos con la estructura esperada."
+                )
+
+                st.warning(
+                    "Esta V4.1 detecta nombres de columnas con variaciones, "
+                    "saltos de línea y celdas combinadas. Si sigue sin encontrar "
+                    "cursos, necesito ver el Excel directamente para adaptar "
+                    "la lectura a su estructura exacta."
                 )
             else:
                 st.success(
