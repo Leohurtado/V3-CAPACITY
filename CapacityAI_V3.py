@@ -243,7 +243,8 @@ def crear_matriz_puestos(puestos):
                 "Puesto de trabajo": puesto,
                 "Modalidad de curso": "Presencial",
                 "Duración": int(curso["Horas"]),
-                "Certificado / lista de asistencia": False,
+                "Certificado": False,
+                "Lista de asistencia": False,
                 "Curso": curso["Curso"],
                 "Asistencia": False,
                 "Nota": None,
@@ -267,8 +268,11 @@ def actualizar_estado(df):
         if pd.isna(row["Nota"]) or str(row["Nota"]).strip() == "":
             return "PENDIENTE DE NOTA"
 
-        if not row["Certificado / lista de asistencia"]:
-            return "PENDIENTE DE CERTIFICADO/LISTA"
+        if not row["Certificado"]:
+            return "PENDIENTE DE CERTIFICADO"
+
+        if not row["Lista de asistencia"]:
+            return "PENDIENTE DE LISTA"
 
         return "COMPLETADO"
 
@@ -569,9 +573,13 @@ elif pagina == "Matriz de capacitación":
                         "Duración",
                         format="%d h"
                     ),
-                "Certificado / lista de asistencia":
+                "Certificado":
                     st.column_config.CheckboxColumn(
-                        "Certificado / lista de asistencia ✓"
+                        "Certificado ✓"
+                    ),
+                "Lista de asistencia":
+                    st.column_config.CheckboxColumn(
+                        "Lista de asistencia ✓"
                     ),
                 "Curso":
                     st.column_config.TextColumn(
