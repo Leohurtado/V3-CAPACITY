@@ -144,50 +144,73 @@ def is_course_col(name):
 # ============================================================
 
 def classify_file(file_bytes, filename):
-    xls = pd.ExcelFile(io.BytesIO(file_bytes))
-    sheets = [norm(s) for s in xls.sheet_names]
+    """
+    Clasificación rápida:
+    primero usa el nombre y los nombres de hojas.
+    Solo inspecciona una pequeña muestra cuando hace falta.
+    """
+    name = norm(filename)
 
-    for sheet in xls.sheet_names:
-        df = pd.read_excel(
-            io.BytesIO(file_bytes),
-            sheet_name=sheet,
-            header=None,
-            nrows=15
-        )
-
-        values = " ".join(
-            norm(x)
-            for x in df.astype(object).values.flatten()
-            if pd.notna(x)
-        )
-
-        if "PUESTO DE TRABAJO / CARGO" in values and "CONTROL ADMINISTRATIVO" in values:
-            return "IPERC"
-
-        if "MATRIZ DE CAPACITACION" in values or "MATRIZ DE CAPACITACIÓN" in values:
-            return "ENTRENAMIENTO"
-
-        if "HORAS MINIMAS" in values or "HORAS MÍNIMAS" in values:
-            return "DIAGNOSTICO"
-
-        if (
-            "MODALIDAD DE ITEM" in values
-            or "MODALIDAD DE ÍTEM" in values
-            or "CODIGO ITEM" in values
-            or "CÓDIGO ITEM" in values
-        ):
-            return "ENTRENAMIENTO"
-
-    joined = " ".join(sheets)
-
-    if "IPERC" in joined:
+    if "IPERC" in name:
         return "IPERC"
-    if "DIAGNOSTICO" in joined or "DIAGNÓSTICO" in joined:
+    if "DIAGNOSTICO" in name or "DIAGNÓSTICO" in name:
         return "DIAGNOSTICO"
-    if "MALLA" in joined or "BDQ1" in joined or "BDQ2" in joined:
+    if "MALLA" in name or "BDQ1" in name or "BDQ2" in name:
         return "ENTRENAMIENTO"
-    if "POSICIONES" in joined or "HR CONNECT" in joined:
+    if "HR CONNECT" in name or "POSICIONES" in name:
         return "PERSONAL"
+
+    try:
+        xls = pd.ExcelFile(io.BytesIO(file_bytes))
+        sheets = [norm(s) for s in xls.sheet_names]
+        joined = " ".join(sheets)
+
+        if "IPERC" in joined:
+            return "IPERC"
+        if "DIAGNOSTICO" in joined or "DIAGNÓSTICO" in joined:
+            return "DIAGNOSTICO"
+        if "MALLA" in joined or "BDQ1" in joined or "BDQ2" in joined:
+            return "ENTRENAMIENTO"
+        if "POSICIONES" in joined or "HR CONNECT" in joined:
+            return "PERSONAL"
+
+        # Solo si el nombre de hoja no ayuda, mirar una muestra pequeña.
+        for sheet in xls.sheet_names[:5]:
+            sample = pd.read_excel(
+                xls,
+                sheet_name=sheet,
+                header=None,
+                nrows=12
+            )
+
+            values = " ".join(
+                norm(x)
+                for x in sample.astype(object).values.flatten()
+                if pd.notna(x)
+            )
+
+            if (
+                "CONTROL ADMINISTRATIVO" in values
+                and (
+                    "PUESTO DE TRABAJO" in values
+                    or "CARGO" in values
+                )
+            ):
+                return "IPERC"
+
+            if "HORAS MINIMAS" in values or "HORAS MÍNIMAS" in values:
+                return "DIAGNOSTICO"
+
+            if (
+                "MODALIDAD DE ITEM" in values
+                or "MODALIDAD DE ÍTEM" in values
+                or "CODIGO ITEM" in values
+                or "CÓDIGO ITEM" in values
+            ):
+                return "ENTRENAMIENTO"
+
+    except Exception:
+        pass
 
     return "OTRO"
 
@@ -1112,86 +1135,189 @@ elif page == "📂 Documentos":
             use_container_width=True
         ):
 
+            total_files = len(uploaded)
+            progress = st.progress(0)
+            status = st.empty()
+
             iperc_parts = []
             diag_parts = []
             malla_parts = []
             personal_parts = []
             info = []
 
-            with st.spinner(
-                "Identificando y analizando documentos..."
-            ):
+            # ------------------------------------------------
+            # ETAPA 1: identificar archivos
+            # ------------------------------------------------
+            status.info(
+                f"Etapa 1/3 — Identificando {total_files} documento(s)..."
+            )
 
-                for uploaded_file in uploaded:
+            file_data = []
 
+            for number, uploaded_file in enumerate(uploaded, start=1):
+                try:
                     content = uploaded_file.getvalue()
+
+                    if not content:
+                        raise ValueError("El archivo está vacío.")
 
                     doc_type = classify_file(
                         content,
                         uploaded_file.name
                     )
 
+                    file_data.append(
+                        (
+                            uploaded_file.name,
+                            content,
+                            doc_type
+                        )
+                    )
+
                     info.append({
                         "Documento": uploaded_file.name,
-                        "Tipo identificado": doc_type
+                        "Tipo identificado": doc_type,
+                        "Estado": "Listo"
                     })
+
+                except Exception as error:
+                    info.append({
+                        "Documento": uploaded_file.name,
+                        "Tipo identificado": "ERROR",
+                        "Estado": str(error)
+                    })
+
+                progress.progress(
+                    min(number / max(total_files, 1) * 0.20, 0.20)
+                )
+
+            # ------------------------------------------------
+            # ETAPA 2: leer fuentes
+            # ------------------------------------------------
+            status.info(
+                "Etapa 2/3 — Leyendo IPERC, diagnóstico, "
+                "malla y posiciones..."
+            )
+
+            valid_files = [
+                item for item in file_data
+                if item[2] != "OTRO"
+            ]
+
+            total_valid = max(len(valid_files), 1)
+
+            for number, (filename, content, doc_type) in enumerate(
+                valid_files,
+                start=1
+            ):
+
+                try:
+
+                    status.info(
+                        f"Etapa 2/3 — {number}/{len(valid_files)}: "
+                        f"{filename} → {doc_type}"
+                    )
 
                     if doc_type == "IPERC":
                         result = read_iperc(
                             content,
-                            uploaded_file.name
+                            filename
                         )
+
                         if not result.empty:
                             iperc_parts.append(result)
 
                     elif doc_type == "DIAGNOSTICO":
                         result = read_diagnostico(
                             content,
-                            uploaded_file.name
+                            filename
                         )
+
                         if not result.empty:
                             diag_parts.append(result)
 
                     elif doc_type == "ENTRENAMIENTO":
                         result = read_malla(
                             content,
-                            uploaded_file.name
+                            filename
                         )
+
                         if not result.empty:
                             malla_parts.append(result)
 
                     elif doc_type == "PERSONAL":
                         result = read_personal(
                             content,
-                            uploaded_file.name
+                            filename
                         )
+
                         if not result.empty:
                             personal_parts.append(result)
 
+                    # Si un archivo falla, los demás siguen.
+                    for item in info:
+                        if item["Documento"] == filename:
+                            item["Estado"] = "Procesado"
+
+                except Exception as error:
+
+                    for item in info:
+                        if item["Documento"] == filename:
+                            item["Estado"] = (
+                                "Error: " + str(error)
+                            )
+
+                progress.progress(
+                    0.20 +
+                    (number / total_valid) * 0.60
+                )
+
+            # ------------------------------------------------
+            # Consolidar
+            # ------------------------------------------------
             st.session_state.files_info = pd.DataFrame(info)
 
             st.session_state.iperc = (
-                pd.concat(iperc_parts, ignore_index=True)
+                pd.concat(
+                    iperc_parts,
+                    ignore_index=True
+                )
                 if iperc_parts
                 else pd.DataFrame()
             )
 
             st.session_state.diagnostico = (
-                pd.concat(diag_parts, ignore_index=True)
+                pd.concat(
+                    diag_parts,
+                    ignore_index=True
+                )
                 if diag_parts
                 else pd.DataFrame()
             )
 
             st.session_state.malla = (
-                pd.concat(malla_parts, ignore_index=True)
+                pd.concat(
+                    malla_parts,
+                    ignore_index=True
+                )
                 if malla_parts
                 else pd.DataFrame()
             )
 
             st.session_state.personal = (
-                pd.concat(personal_parts, ignore_index=True)
+                pd.concat(
+                    personal_parts,
+                    ignore_index=True
+                )
                 if personal_parts
                 else pd.DataFrame()
+            )
+
+            # ------------------------------------------------
+            # ETAPA 3: cruzar y construir matriz
+            # ------------------------------------------------
+            status.info(
+                "Etapa 3/3 — Agrupando cursos y construyendo la matriz..."
             )
 
             catalog = build_course_catalog(
@@ -1208,15 +1334,15 @@ elif page == "📂 Documentos":
 
             st.session_state.matrix = matrix
 
-            st.success(
-                "Documentos analizados."
+            progress.progress(1.0)
+            status.success(
+                "✅ Análisis terminado. Ya puedes abrir "
+                "Matriz de capacitación y Resumen."
             )
 
         if not st.session_state.files_info.empty:
 
-            st.subheader(
-                "📄 Documentos identificados"
-            )
+            st.subheader("📄 Documentos identificados")
 
             st.dataframe(
                 st.session_state.files_info,
@@ -1254,15 +1380,35 @@ elif page == "📂 Documentos":
 
             if not st.session_state.matrix.empty:
 
-                st.subheader(
-                    "📋 Vista previa de la matriz"
-                )
+                st.subheader("📋 Vista previa de la matriz")
 
                 st.dataframe(
                     st.session_state.matrix,
                     use_container_width=True,
                     hide_index=True
                 )
+
+            elif not st.session_state.iperc.empty:
+
+                st.warning(
+                    "Se leyó el IPERC, pero todavía no se pudo "
+                    "relacionar algún curso con el catálogo. "
+                    "La información detectada se conserva para revisión."
+                )
+
+                st.dataframe(
+                    st.session_state.iperc,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            elif st.session_state.files_info.empty is False:
+
+                st.warning(
+                    "Los documentos fueron cargados, pero no se "
+                    "detectó una estructura IPERC compatible."
+                )
+
 
 
 # ============================================================
