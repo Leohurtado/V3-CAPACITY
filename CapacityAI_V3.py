@@ -1,128 +1,93 @@
-
 import io
 import re
 import unicodedata
-from collections import defaultdict
-
 import pandas as pd
 import streamlit as st
-
-
-# ============================================================
-# CAPACITY AI - V3
-# Identificación de cursos por puesto + catálogo obligatorio
-# + seguimiento de modalidad, asistencia, nota y certificado.
-#
-# Lógica principal:
-# Puesto de Trabajo / Cargo
-#        ↓
-# Control Administrativo
-#        ↓
-# Capacitación / Entrenamiento / Curso
-#        ↓
-# Curso requerido
-#        ↓
-# Comparación con catálogo obligatorio
-#        ↓
-# Matriz de seguimiento
-# ============================================================
 
 st.set_page_config(
     page_title="Capacity AI",
     page_icon="🎓",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# ----------------------------
-# ESTILOS
-# ----------------------------
+# ============================================================
+# CAPACITY AI V4
+# Una sola matriz con los campos solicitados:
+# 1. Ítem
+# 2. Puesto de trabajo
+# 3. Modalidad de curso
+# 4. Duración
+# 5. Certificado / lista de asistencia
+# 6. Curso (Asistencia + Nota)
+# 7. Comentarios
+#
+# La fuente para identificar cursos es:
+# Puesto de Trabajo / Cargo + Control Administrativo
+# y dentro de este: Capacitación / Entrenamiento / Curso.
+# ============================================================
+
 st.markdown("""
 <style>
-.stApp {
-    background: #f5f7fb;
-}
-.block-container {
-    padding-top: 1.8rem;
-}
-[data-testid="stSidebar"] {
-    background: #111827;
-}
-[data-testid="stSidebar"] * {
-    color: white !important;
-}
-.kpi {
-    background: white;
-    border: 1px solid #e5e7eb;
-    border-radius: 14px;
-    padding: 16px;
-}
-.small-note {
-    color: #6b7280;
-    font-size: 0.85rem;
-}
+.stApp { background: #f5f7fb; }
+.block-container { padding-top: 1.5rem; }
+[data-testid="stSidebar"] { background: #111827; }
+[data-testid="stSidebar"] * { color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ============================================================
-# CATÁLOGO OBLIGATORIO
+# CATÁLOGO DE REFERENCIA
 # ============================================================
-# Los nombres se dejan editables desde la sección "Catálogo".
-# Las horas corresponden a la tabla de referencia proporcionada.
-# Si se dispone del Excel/PDF oficial del Anexo, conviene reemplazar
-# los nombres por su texto exacto.
 
-CATALOGO_INICIAL = [
-    {"Item": 1, "Curso": "Gestión de Seguridad y Salud Ocupacional basada en el Reglamento de Seguridad y Salud Ocupacional en Minería", "Horas": 3},
-    {"Item": 2, "Curso": "Notificación, Investigación y reporte de incidentes, accidentes e incidentes de trabajo", "Horas": 3},
-    {"Item": 3, "Curso": "Liderazgo y motivación. Seguridad basada en el Comportamiento", "Horas": 2},
-    {"Item": 4, "Curso": "Respuesta a Emergencias por áreas específicas", "Horas": 4},
-    {"Item": 5, "Curso": "IPERC", "Horas": 4},
-    {"Item": 6, "Curso": "Trabajos en altura", "Horas": 4},
-    {"Item": 7, "Curso": "Gestión de Riesgos psicosociales", "Horas": 4},
-    {"Item": 8, "Curso": "Significado y uso de códigos y colores", "Horas": 2},
-    {"Item": 9, "Curso": "Auditoría, Fiscalización e Inspección de seguridad", "Horas": 3},
-    {"Item": 10, "Curso": "Primeros Auxilios", "Horas": 3},
-    {"Item": 11, "Curso": "Prevención y Protección Contra Incendios", "Horas": 2},
-    {"Item": 12, "Curso": "Estándares y procedimientos escritos de trabajo seguro por actividades", "Horas": 2},
-    {"Item": 13, "Curso": "Disposición de residuos, materiales y sustancias peligrosas", "Horas": 2},
-    {"Item": 14, "Curso": "Manejo defensivo y transporte de personal", "Horas": 4},
-    {"Item": 15, "Curso": "Comité de Seguridad y Salud Ocupacional, Reglamento Interno de Seguridad y Salud Ocupacional y Programa Anual", "Horas": 3},
-    {"Item": 16, "Curso": "Seguridad en la ergonomía", "Horas": 2},
-    {"Item": 17, "Curso": "Riesgos Eléctricos", "Horas": 3},
-    {"Item": 18, "Curso": "Prevención de accidente por desprendimiento de rocas", "Horas": 3},
-    {"Item": 19, "Curso": "Prevención de accidente por gaseamiento", "Horas": 3},
-    {"Item": 20, "Curso": "Uso de equipo de protección personal (EPP)", "Horas": 3},
+CATALOGO = [
+    {"Ítem": 1, "Curso": "Gestión de Seguridad y Salud Ocupacional basada en el Reglamento de Seguridad y Salud Ocupacional en Minería", "Horas": 3},
+    {"Ítem": 2, "Curso": "Notificación, Investigación y reporte de incidentes, accidentes e incidentes de trabajo", "Horas": 3},
+    {"Ítem": 3, "Curso": "Liderazgo y motivación. Seguridad basada en el Comportamiento", "Horas": 2},
+    {"Ítem": 4, "Curso": "Respuesta a Emergencias por áreas específicas", "Horas": 4},
+    {"Ítem": 5, "Curso": "IPERC", "Horas": 4},
+    {"Ítem": 6, "Curso": "Trabajos en altura", "Horas": 4},
+    {"Ítem": 7, "Curso": "Gestión de Riesgos psicosociales", "Horas": 4},
+    {"Ítem": 8, "Curso": "Significado y uso de códigos y colores", "Horas": 2},
+    {"Ítem": 9, "Curso": "Auditoría, Fiscalización e Inspección de seguridad", "Horas": 3},
+    {"Ítem": 10, "Curso": "Primeros Auxilios", "Horas": 3},
+    {"Ítem": 11, "Curso": "Prevención y Protección Contra Incendios", "Horas": 2},
+    {"Ítem": 12, "Curso": "Estándares y procedimientos escritos de trabajo seguro por actividades", "Horas": 2},
+    {"Ítem": 13, "Curso": "Disposición de residuos, materiales y sustancias peligrosas", "Horas": 2},
+    {"Ítem": 14, "Curso": "Manejo defensivo y transporte de personal", "Horas": 4},
+    {"Ítem": 15, "Curso": "Comité de Seguridad y Salud Ocupacional, Reglamento Interno de Seguridad y Salud Ocupacional y Programa Anual", "Horas": 3},
+    {"Ítem": 16, "Curso": "Seguridad en la ergonomía", "Horas": 2},
+    {"Ítem": 17, "Curso": "Riesgos Eléctricos", "Horas": 3},
+    {"Ítem": 18, "Curso": "Prevención de accidente por desprendimiento de rocas", "Horas": 3},
+    {"Ítem": 19, "Curso": "Prevención de accidente por gaseamiento", "Horas": 3},
+    {"Ítem": 20, "Curso": "Uso de equipo de protección personal (EPP)", "Horas": 3},
 ]
 
+catalogo = pd.DataFrame(CATALOGO)
+
 
 # ============================================================
-# UTILIDADES
+# FUNCIONES
 # ============================================================
 
-def normalizar(texto):
-    if texto is None or pd.isna(texto):
+def normalizar(valor):
+    if valor is None or pd.isna(valor):
         return ""
-
-    texto = str(texto)
+    texto = str(valor)
     texto = unicodedata.normalize("NFKD", texto)
-    texto = "".join(
-        c for c in texto if not unicodedata.combining(c)
-    )
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
     texto = texto.upper()
     texto = re.sub(r"\s+", " ", texto)
     return texto.strip()
 
 
-def clave_curso(texto):
-    texto = normalizar(texto)
+def clave_curso(valor):
+    texto = normalizar(valor)
 
-    # Equivalencias muy conservadoras.
     equivalencias = {
         "CAPACITACION EN PRIMEROS AUXILIOS": "PRIMEROS AUXILIOS",
-        "CURSO DE PRIMEROS AUXILIOS": "PRIMEROS AUXILIOS",
         "ENTRENAMIENTO EN PRIMEROS AUXILIOS": "PRIMEROS AUXILIOS",
+        "CURSO DE PRIMEROS AUXILIOS": "PRIMEROS AUXILIOS",
         "EQUIPO DE PROTECCION PERSONAL": "USO DE EQUIPO DE PROTECCION PERSONAL (EPP)",
         "USO CORRECTO DEL EQUIPO DE PROTECCION PERSONAL": "USO DE EQUIPO DE PROTECCION PERSONAL (EPP)",
     }
@@ -132,77 +97,58 @@ def clave_curso(texto):
 
 def extraer_puestos(valor):
     texto = normalizar(valor)
-
     if not texto:
         return []
 
     partes = re.split(r"[\n;]+", texto)
-
-    resultado = []
+    salida = []
     vistos = set()
 
     for parte in partes:
         parte = parte.strip(" -•*")
         if not parte:
             continue
-
-        if parte in {
-            "PUESTO DE TRABAJO / CARGO",
-            "PUESTO",
-            "CARGO",
-            "NAN"
-        }:
+        if parte in {"PUESTO DE TRABAJO / CARGO", "PUESTO", "CARGO", "NAN"}:
             continue
-
         if parte not in vistos:
             vistos.add(parte)
-            resultado.append(parte)
+            salida.append(parte)
 
-    return resultado
-
-
-# ============================================================
-# DETECCIÓN DE CAPACITACIÓN EN CONTROL ADMINISTRATIVO
-# ============================================================
-
-PATRONES_CAPACITACION = [
-    re.compile(r"^\s*CAPACITACION(?:ES)?\s*:?\s*$", re.I),
-    re.compile(r"^\s*ENTRENAMIENTO(?:S)?\s*:?\s*$", re.I),
-    re.compile(r"^\s*CURSO(?:S)?\s*:?\s*$", re.I),
-    re.compile(
-        r"^\s*(?:CAPACITACION(?:ES)?\s*/\s*ENTRENAMIENTO(?:S)?|"
-        r"ENTRENAMIENTO(?:S)?\s*/\s*CAPACITACION(?:ES)?|"
-        r"CAPACITACION(?:ES)?\s+Y\s+ENTRENAMIENTO(?:S)?|"
-        r"CAPACITACION(?:ES)?\s+E\s+ENTRENAMIENTO(?:S)?)\s*:?\s*$",
-        re.I
-    ),
-]
+    return salida
 
 
-def es_marcador_capacitacion(linea):
+def es_marcador(linea):
     linea = normalizar(linea)
-    return any(p.match(linea) for p in PATRONES_CAPACITACION)
+
+    patrones = [
+        r"^CAPACITACION(?:ES)?$",
+        r"^ENTRENAMIENTO(?:S)?$",
+        r"^CURSO(?:S)?$",
+        r"^CAPACITACION(?:ES)?\s*/\s*ENTRENAMIENTO(?:S)?$",
+        r"^ENTRENAMIENTO(?:S)?\s*/\s*CAPACITACION(?:ES)?$",
+        r"^CAPACITACION(?:ES)?\s+Y\s+ENTRENAMIENTO(?:S)?$",
+        r"^CAPACITACION(?:ES)?\s+E\s+ENTRENAMIENTO(?:S)?$",
+    ]
+
+    return any(re.match(p, linea) for p in patrones)
 
 
-def es_fin_capacitacion(linea):
+def termina_bloque(linea):
     linea = normalizar(linea)
 
     if "REFERENCIA DOCUMENTARIA" in linea:
         return True
 
-    encabezados = [
+    return linea in {
         "CONTROL DE INGENIERIA",
         "CONTROLES DE INGENIERIA",
         "ELIMINACION",
         "SUSTITUCION",
-    ]
-
-    return linea in encabezados
+    }
 
 
-def extraer_cursos_control(valor):
+def extraer_cursos(valor):
     texto = normalizar(valor)
-
     if not texto:
         return []
 
@@ -215,11 +161,11 @@ def extraer_cursos_control(valor):
         if not linea:
             continue
 
-        if es_marcador_capacitacion(linea):
+        if es_marcador(linea):
             capturando = True
             continue
 
-        if es_fin_capacitacion(linea):
+        if termina_bloque(linea):
             capturando = False
             continue
 
@@ -227,10 +173,11 @@ def extraer_cursos_control(valor):
             continue
 
         curso = linea.strip(" -•*")
+
         if len(curso) < 3:
             continue
 
-        # Evitar líneas claramente documentarias.
+        # No interpretar códigos documentarios como cursos.
         if re.match(r"^(YAN[-\s]|ISO\s*\d|NTP\s*\d|DS\s*\d)", curso):
             continue
 
@@ -241,7 +188,6 @@ def extraer_cursos_control(valor):
 
     for curso in cursos:
         clave = clave_curso(curso)
-
         if clave and clave not in claves:
             claves.add(clave)
             salida.append(curso)
@@ -249,42 +195,33 @@ def extraer_cursos_control(valor):
     return salida
 
 
-# ============================================================
-# LECTURA DEL EXCEL
-# ============================================================
-
 def encontrar_encabezado(df):
-    mejor_fila = None
-    mejor_puntaje = 0
+    mejor = None
+    puntaje_max = 0
 
     for i in range(min(60, len(df))):
         fila = [normalizar(x) for x in df.iloc[i].tolist()]
-
         puntaje = 0
 
         if "PUESTO DE TRABAJO / CARGO" in fila:
             puntaje += 10
-
         if "CONTROL ADMINISTRATIVO" in fila:
             puntaje += 10
-
         if "PROCESO" in fila:
             puntaje += 1
-
         if "ACTIVIDAD" in fila:
             puntaje += 1
-
         if "TAREA" in fila:
             puntaje += 1
 
-        if puntaje > mejor_puntaje:
-            mejor_puntaje = puntaje
-            mejor_fila = i
+        if puntaje > puntaje_max:
+            puntaje_max = puntaje
+            mejor = i
 
-    return mejor_fila
+    return mejor
 
 
-def preparar_tabla(df, fila):
+def preparar_df(df, fila):
     encabezados = []
     repetidos = {}
 
@@ -304,200 +241,160 @@ def preparar_tabla(df, fila):
 
     tabla = df.iloc[fila + 1:].copy()
     tabla.columns = encabezados
-    tabla = tabla.dropna(how="all")
+    return tabla.dropna(how="all").reset_index(drop=True)
 
-    return tabla.reset_index(drop=True)
+
+def encontrar_catalogo(curso):
+    clave = clave_curso(curso)
+
+    # Coincidencia exacta
+    for _, fila in catalogo.iterrows():
+        if clave == clave_curso(fila["Curso"]):
+            return fila
+
+    # Coincidencia conservadora
+    palabras = [p for p in clave.split() if len(p) >= 5]
+
+    if not palabras:
+        return None
+
+    mejor = None
+    mejor_puntaje = 0
+
+    for _, fila in catalogo.iterrows():
+        clave_ref = clave_curso(fila["Curso"])
+        coincidencias = sum(p in clave_ref for p in palabras)
+        puntaje = coincidencias / len(palabras)
+
+        if puntaje > mejor_puntaje:
+            mejor_puntaje = puntaje
+            mejor = fila
+
+    if mejor_puntaje >= 0.70:
+        return mejor
+
+    return None
 
 
 def analizar_excel(archivo):
     archivo.seek(0)
-    xls = pd.ExcelFile(archivo)
+    libro = pd.ExcelFile(archivo)
 
-    evidencias = []
+    encontrados = []
 
-    for hoja in xls.sheet_names:
+    for hoja in libro.sheet_names:
         archivo.seek(0)
+
         df = pd.read_excel(
             archivo,
             sheet_name=hoja,
             header=None
         )
 
-        fila = encontrar_encabezado(df)
+        fila_encabezado = encontrar_encabezado(df)
 
-        if fila is None:
+        if fila_encabezado is None:
             continue
 
-        tabla = preparar_tabla(df, fila)
-        columnas = list(tabla.columns)
+        tabla = preparar_df(
+            df,
+            fila_encabezado
+        )
 
-        puestos_col = None
-        controles = []
+        puesto_col = None
+        control_col = None
 
-        for col in columnas:
-            c = normalizar(col)
+        for col in tabla.columns:
+            col_n = normalizar(col)
 
-            if c == "PUESTO DE TRABAJO / CARGO":
-                puestos_col = col
+            if col_n == "PUESTO DE TRABAJO / CARGO":
+                puesto_col = col
 
-            if c.startswith("CONTROL ADMINISTRATIVO"):
-                controles.append(col)
+            if col_n.startswith("CONTROL ADMINISTRATIVO") and control_col is None:
+                control_col = col
 
-        if not puestos_col or not controles:
+        if puesto_col is None or control_col is None:
             continue
 
-        # Tomamos el primer Control Administrativo.
-        # Si el archivo tiene varios, se puede cambiar aquí.
-        control_col = controles[0]
-
-        for numero, (_, fila_datos) in enumerate(
+        for numero_fila, (_, fila) in enumerate(
             tabla.iterrows(),
             start=1
         ):
             puestos = extraer_puestos(
-                fila_datos[puestos_col]
+                fila[puesto_col]
             )
 
-            cursos = extraer_cursos_control(
-                fila_datos[control_col]
+            cursos = extraer_cursos(
+                fila[control_col]
             )
-
-            if not puestos or not cursos:
-                continue
 
             for puesto in puestos:
                 for curso in cursos:
-                    evidencias.append({
-                        "Puesto de trabajo": puesto,
+                    encontrados.append({
+                        "Puesto": puesto,
                         "Curso detectado": curso,
-                        "Curso clave": clave_curso(curso),
+                        "Clave": clave_curso(curso),
                         "Hoja": hoja,
-                        "Fila": numero,
-                        "Fuente": "Control Administrativo"
+                        "Fila": numero_fila
                     })
 
-    if not evidencias:
+    if not encontrados:
         return pd.DataFrame()
 
-    return pd.DataFrame(evidencias).drop_duplicates()
+    return pd.DataFrame(encontrados).drop_duplicates()
 
 
-# ============================================================
-# CRUCE CON CATÁLOGO
-# ============================================================
-
-def preparar_catalogo():
-    df = pd.DataFrame(CATALOGO_INICIAL)
-    df["Clave"] = df["Curso"].apply(clave_curso)
-    return df
-
-
-def buscar_catalogo(curso, catalogo):
-    clave = clave_curso(curso)
-
-    # Coincidencia exacta
-    encontrado = catalogo[
-        catalogo["Clave"] == clave
-    ]
-
-    if not encontrado.empty:
-        return encontrado.iloc[0]
-
-    # Coincidencia conservadora por inclusión.
-    palabras = [
-        p for p in clave.split()
-        if len(p) >= 5
-    ]
-
-    if not palabras:
-        return None
-
-    candidatos = []
-
-    for _, fila in catalogo.iterrows():
-        clave_catalogo = fila["Clave"]
-
-        coincidencias = sum(
-            1 for palabra in palabras
-            if palabra in clave_catalogo
-        )
-
-        porcentaje = coincidencias / len(palabras)
-
-        if porcentaje >= 0.70:
-            candidatos.append(
-                (porcentaje, fila)
-            )
-
-    if candidatos:
-        candidatos.sort(
-            key=lambda x: x[0],
-            reverse=True
-        )
-        return candidatos[0][1]
-
-    return None
-
-
-def generar_matriz(evidencias, catalogo):
-    filas = []
+def construir_matriz(evidencias):
+    if evidencias.empty:
+        return pd.DataFrame()
 
     agrupado = (
         evidencias
         .groupby(
-            [
-                "Puesto de trabajo",
-                "Curso clave"
-            ]
+            ["Puesto", "Clave"],
+            as_index=False
         )
-        .agg(
-            Curso_detectado=(
-                "Curso detectado",
-                lambda x: " | ".join(sorted(set(x)))
-            ),
-            Evidencias=("Curso detectado", "count")
-        )
-        .reset_index()
+        .agg({
+            "Curso detectado": lambda x: " | ".join(sorted(set(x))),
+            "Hoja": lambda x: " | ".join(sorted(set(x))),
+            "Fila": lambda x: ", ".join(
+                sorted(set(str(v) for v in x))
+            )
+        })
     )
+
+    filas = []
 
     for _, fila in agrupado.iterrows():
 
-        curso_detectado = fila["Curso_detectado"].split(" | ")[0]
+        curso_detectado = fila["Curso detectado"].split(" | ")[0]
+        ref = encontrar_catalogo(curso_detectado)
 
-        match = buscar_catalogo(
-            curso_detectado,
-            catalogo
-        )
-
-        if match is not None:
-            item = int(match["Item"])
-            curso_catalogo = match["Curso"]
-            horas = int(match["Horas"])
-            coincide = "Sí"
+        if ref is not None:
+            item = int(ref["Ítem"])
+            curso = ref["Curso"]
+            horas = int(ref["Horas"])
+            catalogo_estado = "Sí"
         else:
             item = None
-            curso_catalogo = curso_detectado
+            curso = curso_detectado
             horas = None
-            coincide = "No encontrado en catálogo"
+            catalogo_estado = "Revisar"
 
         filas.append({
             "Ítem": item,
-            "Puesto de trabajo": fila["Puesto de trabajo"],
-            "Modalidad": "Por definir",
-            "Duración (horas)": horas,
-            "Certificado / Lista de asistencia": False,
-            "Curso": curso_catalogo,
+            "Puesto de trabajo": fila["Puesto"],
+            "Modalidad de curso": "Por definir",
+            "Duración": horas,
+            "Certificado / lista de asistencia": False,
+            "Curso": curso,
             "Asistencia": False,
             "Nota": None,
             "Comentarios": "",
-            "Estado": "Pendiente",
-            "Coincide con catálogo": coincide,
-            "Evidencias IPERC": int(fila["Evidencias"]),
-            "Curso detectado": fila["Curso_detectado"]
+            "Estado": "PENDIENTE",
+            "Catálogo": catalogo_estado,
+            "Evidencia": f"{fila['Hoja']} / fila {fila['Fila']}"
         })
-
-    if not filas:
-        return pd.DataFrame()
 
     return pd.DataFrame(filas).sort_values(
         ["Puesto de trabajo", "Ítem"],
@@ -505,67 +402,41 @@ def generar_matriz(evidencias, catalogo):
     ).reset_index(drop=True)
 
 
-# ============================================================
-# ESTADO
-# ============================================================
-
-def calcular_estado(fila):
-    asistencia = bool(fila.get("Asistencia", False))
-    certificado = bool(
-        fila.get(
-            "Certificado / Lista de asistencia",
-            False
-        )
-    )
-
-    nota = fila.get("Nota")
-
-    if not asistencia:
-        return "PENDIENTE"
-
-    if pd.isna(nota) or nota is None or str(nota).strip() == "":
-        return "PENDIENTE DE NOTA"
-
-    if not certificado:
-        return "PENDIENTE DE CERTIFICADO/LISTA"
-
-    return "COMPLETADO"
-
-
-def actualizar_estados(df):
+def actualizar_estado(df):
     if df.empty:
         return df
 
     df = df.copy()
-    df["Estado"] = df.apply(
-        calcular_estado,
-        axis=1
-    )
 
+    def estado(fila):
+        if not bool(fila["Asistencia"]):
+            return "PENDIENTE"
+
+        nota = fila["Nota"]
+
+        if pd.isna(nota) or str(nota).strip() == "":
+            return "PENDIENTE DE NOTA"
+
+        if not bool(fila["Certificado / lista de asistencia"]):
+            return "PENDIENTE DE CERTIFICADO/LISTA"
+
+        return "COMPLETADO"
+
+    df["Estado"] = df.apply(estado, axis=1)
     return df
 
 
-# ============================================================
-# EXPORTAR
-# ============================================================
-
-def exportar_excel(matriz, evidencias, catalogo):
-    salida = io.BytesIO()
+def exportar(matriz, evidencias):
+    memoria = io.BytesIO()
 
     with pd.ExcelWriter(
-        salida,
+        memoria,
         engine="openpyxl"
     ) as writer:
 
         matriz.to_excel(
             writer,
-            sheet_name="Matriz de capacitación",
-            index=False
-        )
-
-        catalogo.to_excel(
-            writer,
-            sheet_name="Catálogo obligatorio",
+            sheet_name="Matriz",
             index=False
         )
 
@@ -575,16 +446,19 @@ def exportar_excel(matriz, evidencias, catalogo):
             index=False
         )
 
-    salida.seek(0)
-    return salida
+        catalogo.to_excel(
+            writer,
+            sheet_name="Cursos obligatorios",
+            index=False
+        )
+
+    memoria.seek(0)
+    return memoria
 
 
 # ============================================================
-# SESSION STATE
+# ESTADO DE LA APP
 # ============================================================
-
-if "catalogo" not in st.session_state:
-    st.session_state.catalogo = preparar_catalogo()
 
 if "evidencias" not in st.session_state:
     st.session_state.evidencias = pd.DataFrame()
@@ -594,82 +468,55 @@ if "matriz" not in st.session_state:
 
 
 # ============================================================
-# SIDEBAR
+# MENÚ
 # ============================================================
 
 st.sidebar.title("🎓 Capacity AI")
-st.sidebar.caption(
-    "Identificación y seguimiento de capacitación"
-)
+st.sidebar.write("Plan de capacitación por puesto")
 
-menu = st.sidebar.radio(
-    "Módulos",
+opcion = st.sidebar.radio(
+    "Secciones",
     [
-        "🏠 Dashboard",
-        "📂 Analizar IPERC",
-        "👔 Por puesto",
-        "📋 Matriz de capacitación",
-        "📚 Catálogo obligatorio",
-        "📊 Resumen",
-        "📥 Exportar"
+        "Inicio",
+        "Analizar IPERC",
+        "Matriz de capacitación",
+        "Resumen",
+        "Exportar"
     ]
 )
 
 
 # ============================================================
-# DASHBOARD
+# INICIO
 # ============================================================
 
-if menu == "🏠 Dashboard":
+if opcion == "Inicio":
 
     st.title("🎓 Capacity AI")
 
     st.subheader(
-        "Matriz inteligente de capacitación por puesto"
+        "Sistema de identificación y seguimiento de capacitación"
     )
 
     st.write(
-        "La aplicación identifica las capacitaciones, "
-        "entrenamientos y cursos dentro de Control Administrativo, "
-        "los agrupa por puesto y los cruza con el catálogo "
-        "obligatorio."
+        "La aplicación identifica los cursos requeridos por puesto "
+        "a partir de la matriz IPERC y Control Administrativo, "
+        "los agrupa y los presenta en una única matriz de seguimiento."
     )
 
-    matriz = st.session_state.matriz
+    st.markdown("""
+    ### Flujo
 
-    puestos = (
-        matriz["Puesto de trabajo"].nunique()
-        if not matriz.empty else 0
-    )
-
-    cursos = (
-        matriz["Curso"].nunique()
-        if not matriz.empty else 0
-    )
-
-    pendientes = (
-        int((matriz["Estado"] == "PENDIENTE").sum())
-        if not matriz.empty else 0
-    )
-
-    completados = (
-        int((matriz["Estado"] == "COMPLETADO").sum())
-        if not matriz.empty else 0
-    )
-
-    a, b, c, d = st.columns(4)
-
-    a.metric("Puestos", puestos)
-    b.metric("Cursos", cursos)
-    c.metric("Pendientes", pendientes)
-    d.metric("Completados", completados)
-
-    st.divider()
+    **Puesto de Trabajo / Cargo**
+    → **Control Administrativo**
+    → **Capacitación / Entrenamiento / Curso**
+    → **Agrupación**
+    → **Curso obligatorio + horas**
+    → **Asistencia + nota + certificado + comentarios**
+    """)
 
     st.info(
-        "Flujo: Puesto de trabajo → Control Administrativo → "
-        "Capacitación/Entrenamiento/Curso → Catálogo → "
-        "Asistencia + Nota + Certificado → Estado."
+        "La matriz final concentra toda la información en una sola tabla."
     )
 
 
@@ -677,62 +524,42 @@ if menu == "🏠 Dashboard":
 # ANALIZAR IPERC
 # ============================================================
 
-elif menu == "📂 Analizar IPERC":
+elif opcion == "Analizar IPERC":
 
-    st.title("📂 Analizar matriz IPERC")
+    st.title("📂 Analizar IPERC")
 
     archivo = st.file_uploader(
-        "Carga el Excel de prueba o una matriz IPERC",
+        "Sube la matriz Excel",
         type=["xlsx", "xls"]
     )
 
     if archivo:
 
-        st.success(
-            f"Archivo listo: {archivo.name}"
-        )
-
         if st.button(
-            "🔍 Analizar y generar matriz",
+            "🔍 Analizar y crear matriz",
             type="primary",
             use_container_width=True
         ):
 
             with st.spinner(
-                "Analizando puestos y Control Administrativo..."
+                "Identificando puestos y cursos..."
             ):
-
-                evidencias = analizar_excel(
-                    archivo
-                )
-
-                if evidencias.empty:
-                    matriz = pd.DataFrame()
-                else:
-                    matriz = generar_matriz(
-                        evidencias,
-                        st.session_state.catalogo
-                    )
+                evidencias = analizar_excel(archivo)
+                matriz = construir_matriz(evidencias)
 
             st.session_state.evidencias = evidencias
             st.session_state.matriz = matriz
 
             if matriz.empty:
-
                 st.error(
                     "No se encontraron cursos. "
-                    "Verifica que el Excel tenga las columnas "
-                    "'Puesto de Trabajo / Cargo' y "
-                    "'Control Administrativo', y que dentro del "
-                    "control existan bloques de Capacitación, "
-                    "Entrenamiento o Curso."
+                    "Revisa las columnas Puesto de Trabajo / Cargo "
+                    "y Control Administrativo."
                 )
-
             else:
-
                 st.success(
-                    f"Listo. Se encontraron "
-                    f"{len(matriz)} relaciones puesto-curso."
+                    f"Se generaron {len(matriz)} registros "
+                    "de capacitación."
                 )
 
                 st.dataframe(
@@ -743,65 +570,10 @@ elif menu == "📂 Analizar IPERC":
 
 
 # ============================================================
-# POR PUESTO
+# MATRIZ ÚNICA
 # ============================================================
 
-elif menu == "👔 Por puesto":
-
-    st.title("👔 Capacitación por puesto")
-
-    matriz = st.session_state.matriz
-
-    if matriz.empty:
-
-        st.info(
-            "Primero analiza una matriz IPERC."
-        )
-
-    else:
-
-        puestos = sorted(
-            matriz["Puesto de trabajo"].unique()
-        )
-
-        puesto = st.selectbox(
-            "Selecciona el puesto",
-            puestos
-        )
-
-        datos = matriz[
-            matriz["Puesto de trabajo"] == puesto
-        ].copy()
-
-        st.metric(
-            "Cursos requeridos",
-            len(datos)
-        )
-
-        st.dataframe(
-            datos[
-                [
-                    "Ítem",
-                    "Curso",
-                    "Duración (horas)",
-                    "Modalidad",
-                    "Asistencia",
-                    "Nota",
-                    "Certificado / Lista de asistencia",
-                    "Estado",
-                    "Comentarios"
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-# ============================================================
-# MATRIZ DE CAPACITACIÓN
-# ============================================================
-
-elif menu == "📋 Matriz de capacitación":
+elif opcion == "Matriz de capacitación":
 
     st.title("📋 Matriz de capacitación")
 
@@ -809,26 +581,40 @@ elif menu == "📋 Matriz de capacitación":
 
     if matriz.empty:
 
-        st.info(
-            "Primero analiza una matriz IPERC."
+        st.warning(
+            "Primero sube y analiza una matriz IPERC."
         )
 
     else:
 
         st.write(
-            "Marca asistencia y certificado/lista de asistencia. "
-            "Ingresa la nota cuando corresponda. "
-            "La aplicación actualizará el estado automáticamente."
+            "Aquí está TODO junto. Solo debes completar "
+            "modalidad, asistencia, nota, certificado/lista "
+            "y comentarios."
         )
 
         editada = st.data_editor(
             matriz,
             use_container_width=True,
             hide_index=True,
-            num_rows="dynamic",
+            disabled=[
+                "Ítem",
+                "Puesto de trabajo",
+                "Duración",
+                "Curso",
+                "Estado",
+                "Catálogo",
+                "Evidencia"
+            ],
             column_config={
-                "Modalidad": st.column_config.SelectboxColumn(
-                    "Modalidad",
+                "Ítem": st.column_config.NumberColumn(
+                    "Ítem"
+                ),
+                "Puesto de trabajo": st.column_config.TextColumn(
+                    "Puesto de trabajo"
+                ),
+                "Modalidad de curso": st.column_config.SelectboxColumn(
+                    "Modalidad de curso",
                     options=[
                         "Por definir",
                         "Presencial",
@@ -836,25 +622,30 @@ elif menu == "📋 Matriz de capacitación":
                     ],
                     required=True
                 ),
-                "Duración (horas)": st.column_config.NumberColumn(
+                "Duración": st.column_config.NumberColumn(
                     "Duración (horas)",
-                    min_value=0,
-                    step=1
+                    format="%d h"
                 ),
-                "Certificado / Lista de asistencia":
+                "Certificado / lista de asistencia":
                     st.column_config.CheckboxColumn(
-                        "Certificado / Lista de asistencia"
+                        "Certificado / lista de asistencia",
+                        help="Marcar cuando exista certificado o lista de asistencia."
                     ),
+                "Curso": st.column_config.TextColumn(
+                    "Curso"
+                ),
                 "Asistencia":
                     st.column_config.CheckboxColumn(
-                        "Asistencia"
+                        "Asistencia ✓",
+                        help="Marca si el trabajador asistió."
                     ),
                 "Nota":
                     st.column_config.NumberColumn(
                         "Nota",
                         min_value=0,
                         max_value=20,
-                        step=0.5
+                        step=0.5,
+                        help="Ingresa la nota obtenida."
                     ),
                 "Comentarios":
                     st.column_config.TextColumn(
@@ -864,123 +655,82 @@ elif menu == "📋 Matriz de capacitación":
                     st.column_config.TextColumn(
                         "Estado",
                         disabled=True
+                    ),
+                "Catálogo":
+                    st.column_config.TextColumn(
+                        "Catálogo"
+                    ),
+                "Evidencia":
+                    st.column_config.TextColumn(
+                        "Evidencia"
                     )
             }
         )
 
-        editada = actualizar_estados(
-            editada
-        )
+        editada = actualizar_estado(editada)
 
         st.session_state.matriz = editada
 
         st.success(
-            "Cambios guardados en la sesión."
+            "La matriz quedó actualizada."
         )
 
+        st.subheader("Estado actual")
 
-# ============================================================
-# CATÁLOGO
-# ============================================================
+        estados = (
+            editada["Estado"]
+            .value_counts()
+            .rename_axis("Estado")
+            .reset_index(name="Cantidad")
+        )
 
-elif menu == "📚 Catálogo obligatorio":
-
-    st.title("📚 Catálogo obligatorio")
-
-    st.write(
-        "Aquí se mantiene el catálogo de referencia. "
-        "Puedes corregir los nombres si luego nos entregan "
-        "el documento oficial en Excel/PDF."
-    )
-
-    catalogo = st.data_editor(
-        st.session_state.catalogo,
-        use_container_width=True,
-        hide_index=True,
-        num_rows="fixed",
-        column_config={
-            "Item": st.column_config.NumberColumn(
-                "Ítem",
-                disabled=True
-            ),
-            "Horas": st.column_config.NumberColumn(
-                "Horas obligatorias",
-                min_value=0,
-                step=1
-            ),
-            "Curso": st.column_config.TextColumn(
-                "Curso obligatorio"
-            ),
-            "Clave": None
-        }
-    )
-
-    catalogo["Clave"] = catalogo["Curso"].apply(
-        clave_curso
-    )
-
-    st.session_state.catalogo = catalogo
+        st.dataframe(
+            estados,
+            use_container_width=True,
+            hide_index=True
+        )
 
 
 # ============================================================
 # RESUMEN
 # ============================================================
 
-elif menu == "📊 Resumen":
+elif opcion == "Resumen":
 
-    st.title("📊 Resumen de capacitación")
+    st.title("📊 Resumen")
 
     matriz = st.session_state.matriz
 
     if matriz.empty:
 
         st.info(
-            "Primero analiza una matriz IPERC."
+            "Primero analiza el IPERC."
         )
 
     else:
 
+        total = len(matriz)
         completados = int(
             (matriz["Estado"] == "COMPLETADO").sum()
         )
-
-        pendientes = int(
-            (matriz["Estado"] != "COMPLETADO").sum()
-        )
+        pendientes = total - completados
 
         c1, c2, c3 = st.columns(3)
 
-        c1.metric(
-            "Total de capacitaciones",
-            len(matriz)
-        )
-
-        c2.metric(
-            "Completadas",
-            completados
-        )
-
-        c3.metric(
-            "Pendientes",
-            pendientes
-        )
+        c1.metric("Capacitaciones", total)
+        c2.metric("Completadas", completados)
+        c3.metric("Pendientes", pendientes)
 
         st.subheader(
-            "Cursos que se deben llevar"
+            "Cursos requeridos agrupados"
         )
 
         resumen = (
             matriz
-            .groupby("Curso")
+            .groupby("Curso", as_index=False)
             .agg(
-                Puestos=(
-                    "Puesto de trabajo",
-                    lambda x: len(set(x))
-                ),
-                Horas=(
-                    "Duración (horas)",
-                    "first"
-                ),
+                Puestos=("Puesto de trabajo", "nunique"),
+                Horas=("Duración", "first"),
                 Completados=(
                     "Estado",
                     lambda x: int(
@@ -988,7 +738,6 @@ elif menu == "📊 Resumen":
                     )
                 )
             )
-            .reset_index()
             .sort_values(
                 "Puestos",
                 ascending=False
@@ -1001,69 +750,33 @@ elif menu == "📊 Resumen":
             hide_index=True
         )
 
-        st.subheader(
-            "Estado por puesto"
-        )
-
-        resumen_puesto = (
-            matriz
-            .groupby("Puesto de trabajo")
-            .agg(
-                Cursos=(
-                    "Curso",
-                    "count"
-                ),
-                Completados=(
-                    "Estado",
-                    lambda x: int(
-                        (x == "COMPLETADO").sum()
-                    )
-                ),
-                Pendientes=(
-                    "Estado",
-                    lambda x: int(
-                        (x != "COMPLETADO").sum()
-                    )
-                )
-            )
-            .reset_index()
-        )
-
-        st.dataframe(
-            resumen_puesto,
-            use_container_width=True,
-            hide_index=True
-        )
-
 
 # ============================================================
 # EXPORTAR
 # ============================================================
 
-elif menu == "📥 Exportar":
+elif opcion == "Exportar":
 
-    st.title("📥 Exportar matriz")
+    st.title("📥 Exportar")
 
     matriz = st.session_state.matriz
     evidencias = st.session_state.evidencias
-    catalogo = st.session_state.catalogo
 
     if matriz.empty:
 
         st.info(
-            "Primero analiza una matriz."
+            "No hay información para exportar."
         )
 
     else:
 
-        archivo = exportar_excel(
+        archivo = exportar(
             matriz,
-            evidencias,
-            catalogo
+            evidencias
         )
 
         st.download_button(
-            "📥 Descargar Excel",
+            "📥 Descargar matriz completa en Excel",
             data=archivo,
             file_name="CapacityAI_Matriz_Capacitacion.xlsx",
             mime=(
